@@ -1,0 +1,13 @@
+.env
+terraform.tfstate
+terraform.tfstate.backup
+backend.tfvars
+terraform.tfvars
+.terraform/
+credentials.tfvars
+planfile
+source_tfvars.sh
+vault
+.terraform.lock.hcl
+credentials.auto.tfvars
+ansible.auto.tfvars

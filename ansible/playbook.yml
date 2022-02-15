@@ -1,0 +1,269 @@
+---
+# 1. Shutdown (Deallocate) current machine (ansible)
+# 2. Copy managed disk
+# 4. Create temporary VM with copied disk (terraform)
+# 5. SSH into temporary VM and run sysprep and shutdown (ansible)
+# 6. Shutdown temporary VM
+# 7. Deallocate temporary VM (ansible)
+# 8. Create mangaged Image from new VM (terraform)
+# 9. Create shared gallery version (ansible)
+# 10. Destroy managed Image  (terraform)
+# 11. Destroy temporary VM  (terraform)
+
+- hosts: localhost
+  connection: local
+  collections:
+    - azure.azcollection
+  vars_files:
+    - vars/azure_image.yml
+
+  tasks:
+
+  #
+  # Deallocate source VM
+  #
+  - name: Deallocate source VM - {{ azure_source_vm_name }}
+    azure_rm_virtualmachine:
+      resource_group: '{{ azure_source_resource_group_name }}'
+      name: '{{ azure_source_vm_name }}'
+      allocated: no
+    register: deallocate_source_vm_result
+    tags: deallocate_source_vm
+  - debug:
+      var: deallocate_source_vm_result
+    tags: [never, deallocate_source_vm]
+
+  #
+  # Get facts for source managed disk
+  #
+  - name: Get facts for source managed disk managed by {{ deallocate_source_vm_result.ansible_facts.azure_vm.name }}
+    azure_rm_manageddisk_info:
+      managed_by: '{{ deallocate_source_vm_result.ansible_facts.azure_vm.id }}'
+    register: source_manageddisk_info
+    tags: deallocate_source_vm
+  - debug:
+      var: source_manageddisk_info
+    tags: [never, deallocate_source_vm]
+  - debug:
+      msg: '{{ source_manageddisk_info.ansible_info.azure_managed_disk[0].id }}'
+    tags: [never, deallocate_source_vm]
+
+  - name: set_fact for terraform.tfvars file
+    set_fact:
+      azure_source_managed_disk_name: '{{ source_manageddisk_info.ansible_info.azure_managed_disk[0].name }}'
+      azure_location: '{{ deallocate_source_vm_result.ansible_facts.azure_vm.location }}'
+      azure_temp_vm_name: 'tmp-{{ deallocate_source_vm_result.ansible_facts.azure_vm.name }}'
+      azure_temp_vm_size: '{{ deallocate_source_vm_result.ansible_facts.azure_vm.properties.hardwareProfile.vmSize }}'
+      azure_temp_managed_disk_name: 'tmp-{{ deallocate_source_vm_result.ansible_facts.azure_vm.name }}-osdisk'
+      azure_temp_managed_disk_hyper_v_generation: '{{ deallocate_source_vm_result.ansible_facts.azure_vm.properties.instanceView.hyperVGeneration }}'
+      azure_temp_image_name: 'tmp-{{ deallocate_source_vm_result.ansible_facts.azure_vm.name }}-image'
+    tags: deallocate_source_vm
+
+  - name: generate terraform.tfvars vars_file
+    template:
+      src: 'templates/terraform.tfvars.j2'
+      dest: '{{ tf_create_vm_project_path }}/ansible.auto.tfvars'
+    tags: deallocate_source_vm
+
+  #
+  # Copy VM's managed disk and create temporary VM
+  #
+  - name: Copy VM's managed disk and create temporary VM
+    community.general.terraform:
+      project_path: '{{ tf_create_vm_project_path }}'
+      force_init: yes
+      state: "{{ state | default('present') }}"
+    register: tf_create_vm_result
+    tags: tf_create_vm
+  - debug:
+      var: tf_create_vm_result
+    tags: [never, tf_create_vm]
+
+  #
+  # Add temporary VMs public IP to ansible inventory
+  #
+  - name: Add temporary VMs public IP to ansible inventory
+    add_host:
+      name: '{{ tf_create_vm_result.outputs.vm_public_ip.value }}'
+      groups: ["windows"]
+    tags: tf_create_vm
+
+#
+# Switch to temporary VM
+#
+- hosts: windows
+  tasks:
+
+  #
+  # Test temporary VM
+  #
+  - name: Test temporary VM
+    win_shell: |
+      ping 8.8.8.8
+    register: test_vm_result
+    tags: tf_create_vm
+  - debug:
+      var: test_vm_result
+    tags: [never, tf_create_vm]
+
+  #
+  # Run Sysprep on temporary VM
+  #
+  - name: Run Sysprep on temporary VM
+    win_shell: |
+      & $env:SystemRoot\\System32\\Sysprep\\Sysprep.exe /oobe /generalize /quiet /quit /mode:vm
+      while($true) {
+        $imageState = Get-ItemProperty HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Setup\\State | Select ImageState
+        if($imageState.ImageState -ne 'IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE') {
+          Write-Output $imageState.ImageState; Start-Sleep -s 10
+        } else {
+          break
+        }
+      }
+    register: sysprep_result
+    tags: sysprep
+  - debug:
+      var: sysprep_result
+    tags: [never, sysprep]
+
+#
+# Switch back to localhost
+#
+- hosts: localhost
+  connection: local
+  collections:
+    - azure.azcollection
+  vars_files:
+    - vars/azure_image.yml
+
+  tasks:
+
+  - name: Get facts of source VM - {{ azure_source_vm_name }}
+    azure_rm_virtualmachine_info:
+      resource_group: '{{ azure_source_resource_group_name }}'
+      name: '{{ azure_source_vm_name }}'
+    register: facts_source_vm_result
+    tags: facts_source_vm
+  - debug:
+      var: facts_source_vm_result
+    tags: [never, facts_source_vm]
+
+  - name: set_fact for azure_temp_vm_name
+    set_fact:
+      azure_temp_vm_name: 'tmp-{{ facts_source_vm_result.vms[0].name }}'
+    tags: facts_source_vm
+
+  #
+  # Deallocate temporary VM
+  #
+  - name: Deallocate VM {{ azure_temp_vm_name }}
+    azure_rm_virtualmachine:
+      resource_group: '{{ azure_temp_resource_group_name }}'
+      name: '{{ azure_temp_vm_name }}'
+      allocated: no
+    register: deallocate_vm_result
+    tags: deallocate_vm
+  - debug:
+      var: deallocate_vm_result
+    tags: [never, deallocate_vm]
+
+  #
+  # Get facts for managed disk
+  #
+  - name: Get facts for managed disk managed by {{ azure_temp_vm_name }}
+    azure_rm_manageddisk_info:
+      managed_by: '{{ deallocate_vm_result.ansible_facts.azure_vm.id }}'
+    register: manageddisk_info
+    tags: deallocate_vm
+  - debug:
+      var: manageddisk_info
+    tags: [never, deallocate_vm]
+  - debug:
+      msg: '{{ manageddisk_info.ansible_info.azure_managed_disk[0].id }}'
+    tags: [never, deallocate_vm]
+
+
+  - name: set_fact for terraform.tfvars file
+    set_fact:
+      azure_source_managed_disk_name: '{{ manageddisk_info.ansible_info.azure_managed_disk[0].name }}'
+      azure_location: '{{ deallocate_vm_result.ansible_facts.azure_vm.location }}'
+      azure_temp_vm_name: '{{ deallocate_vm_result.ansible_facts.azure_vm.name }}'
+      azure_temp_vm_size: '{{ deallocate_vm_result.ansible_facts.azure_vm.properties.hardwareProfile.vmSize }}'
+      azure_temp_managed_disk_name: '{{ deallocate_vm_result.ansible_facts.azure_vm.name }}-osdisk'
+      azure_temp_managed_disk_hyper_v_generation: '{{ deallocate_vm_result.ansible_facts.azure_vm.properties.instanceView.hyperVGeneration }}'
+      azure_temp_image_name: '{{ deallocate_vm_result.ansible_facts.azure_vm.name }}-image'
+    tags: deallocate_vm
+
+
+  - name: generate terraform.tfvars vars_file
+    template:
+      src: 'templates/terraform.tfvars.j2'
+      dest: '{{ tf_create_image_project_path }}/ansible.auto.tfvars'
+    tags: deallocate_vm
+
+  #
+  # Create Managed Image
+  #
+  - name: Create Image from {{ azure_temp_vm_name }}
+    community.general.terraform:
+      project_path: '{{ tf_create_image_project_path }}'
+      force_init: yes
+      state: "{{ state | default('present') }}"
+    register: tf_create_image_result
+    tags: tf_create_image
+  - debug:
+      var: tf_create_image_result
+    tags: [never, tf_create_image]
+
+  #
+  # Create Gallery Image Version
+  #
+  - name: Create a gallery image version form a managed image {{ azure_sig_image_version_name }}
+    azure_rm_galleryimageversion:
+      resource_group: '{{ azure_sig_resource_group_name }}'
+      gallery_name: '{{ azure_sig_name}}'
+      gallery_image_name: '{{ azure_sig_image_definition_name }}'
+      name: '{{ azure_sig_image_version_name }}'
+      location: '{{ azure_sig_resource_group_location }}'
+      publishing_profile:
+        end_of_life_date: "2099-12-31t00:00:00+00:00"
+        exclude_from_latest: no
+        replica_count: 1
+        storage_account_type: Standard_LRS
+        target_regions:
+          - name: '{{ azure_sig_resource_group_location }}'
+      storage_profile:
+          source_image: '{{ tf_create_image_result.outputs.managed_image_id.value }}'
+      state: present
+    register: gallery_image_version_result
+    tags: tf_create_image
+
+  - debug:
+      var: gallery_image_version_result
+    tags: [never, tf_create_image]
+
+  #
+  # Destroy image
+  #
+  - name: Destroy Image {{ azure_temp_vm_name }}
+    community.general.terraform:
+      project_path: '{{ tf_create_image_project_path }}'
+      state: absent
+    register: tf_destroy_image_result
+    tags: tf_destroy_image
+  - debug:
+      var: tf_destroy_image_result
+    tags: [never, tf_destroy_image]
+
+  #
+  # Destroy VM
+  #
+  - name: Destroy VM {{ azure_temp_vm_name }}
+    community.general.terraform:
+      project_path: '{{ tf_create_vm_project_path }}'
+      state: absent
+    register: tf_destroy_vm_result
+    tags: tf_destroy_vm
+  - debug:
+      var: tf_destroy_vm_result
+    tags: [never, tf_destroy_vm]

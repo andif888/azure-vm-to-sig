@@ -1,0 +1,69 @@
+name: generate_new_image_version
+
+on:
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+    inputs:
+      azure_sig_image_version_name:
+        required: true
+        description: 'Specify the new Image Version (e.g. 1.0.0)'
+      azure_source_vm_name:
+        required: true
+        description: 'Specify the name of the source VM'
+      azure_source_resource_group_name:
+        required: true
+        description: 'Specify the name of the Resource Group of the source VM'
+        default: 'rg-test'
+
+jobs:
+  build_job:
+    name: build_job
+    runs-on: ubuntu-latest
+    steps:
+    - name: checkout_repo
+      uses: actions/checkout@v2
+
+    - name: ansible_setup
+      id: ansible_setup
+      run: |
+        sudo apt-get update
+        sudo apt install -y curl jq unzip python3-pip python3-netaddr python3-jmespath sshpass
+        sudo pip install --upgrade pip
+        pip install ansible cryptography passlib msrest
+        pip install ansible[azure]
+        ansible-galaxy collection install azure.azcollection
+        pip install -r ~/.ansible/collections/ansible_collections/azure/azcollection/requirements-azure.txt
+
+    - name: terraform_setup
+      env:
+        TF_VERSION: 1.1.5
+      run: |
+        curl -O https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip
+        sudo unzip terraform_${TF_VERSION}_linux_amd64.zip -d /usr/bin
+        rm -f terraform_${TF_VERSION}_linux_amd64.zip
+        sudo chmod +x /usr/bin/terraform
+
+    - name: azure_cli_setup
+      id: azure_cli_setup
+      run: |
+        curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+
+    - name: ssh_setup
+      env:
+        SSH_AUTH_SOCK: /tmp/ssh_agent.sock
+      run: |
+        echo -n ${{ secrets.envfile }} > .env && source .env
+        ssh-agent -a $SSH_AUTH_SOCK > /dev/null
+
+    - name: ansible_playbook_site
+      id: ansible_playbook_site
+      env:
+        SSH_AUTH_SOCK: /tmp/ssh_agent.sock
+      run: |
+        echo -n ${{ secrets.envfile }} > .env && source .env
+        cd ansible
+        ansible-galaxy collection install -v -r requirements.yml
+        export azure_source_resource_group_name=${{ github.event.inputs.azure_source_resource_group_name }}
+        export azure_source_vm_name=${{ github.event.inputs.azure_source_vm_name }}
+        export azure_sig_image_version_name=${{ github.event.inputs.azure_sig_image_version_name }}
+        ansible-playbook -i inventory playbook.yml

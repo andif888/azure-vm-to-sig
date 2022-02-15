@@ -1,0 +1,36 @@
+---
+# ----------------------------------------------------
+# Mandatory variables for building a new image version
+#-----------------------------------------------------
+
+# Name of the azure resource group, which contains the source VM
+azure_source_resource_group_name: "{{ lookup('env', 'azure_source_resource_group_name') }}"
+# Name of the source VM
+azure_source_vm_name: "{{ lookup('env', 'azure_source_vm_name') }}"
+# Name of the azure shared image gallery image version, which should be created
+azure_sig_image_version_name: "{{ lookup('env', 'azure_sig_image_version_name') }}"
+
+#-------------------------------------------------------------------------
+# Mandatory variables for pre-existing azure share image gallery resources
+#-------------------------------------------------------------------------
+
+# Name of the resource group which contains the azure shared image gallery
+azure_sig_resource_group_name: "{{ lookup('env', 'azure_sig_resource_group_name') }}"
+# Azure region where the azure shared image gallery exists
+azure_sig_resource_group_location: "{{ lookup('env', 'azure_sig_resource_group_location') }}"
+# Name of the azure shared image gallery
+azure_sig_name: "{{ lookup('env', 'azure_sig_name') }}"
+# Name of the azure shared image gallery image definition, where the new version should be deployed
+azure_sig_image_definition_name: "{{ lookup('env', 'azure_sig_image_definition_name') }}"
+
+
+#----------------------------------------------------------------
+# Mandatory variables for internal use, no changes necessary here
+# ---------------------------------------------------------------
+
+# Name of a temporary create azure resource group
+azure_temp_resource_group_name: "tmp-{{ lookup('env', 'azure_sig_resource_group_name') }}"
+# Relative path to the terraform plan to build a temporary VM
+tf_create_vm_project_path: '../terraform/azure_vm'
+# Relative path to the terraform plan to build a temporary managed VM Image
+tf_create_image_project_path: '../terraform/azure_image'
