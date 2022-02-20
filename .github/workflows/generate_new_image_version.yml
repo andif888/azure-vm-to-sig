@@ -38,7 +38,7 @@ jobs:
       env:
         SSH_AUTH_SOCK: /tmp/ssh_agent.sock
       run: |
-        echo -n ${{ secrets.envfile }} > .env && source .env
+        echo -n ${{ secrets.envfile }} > .env && . .env
         ssh-agent -a $SSH_AUTH_SOCK > /dev/null
 
     - name: ansible playbook
@@ -46,7 +46,7 @@ jobs:
       env:
         SSH_AUTH_SOCK: /tmp/ssh_agent.sock
       run: |
-        echo -n ${{ secrets.envfile }} > .env && source .env
+        echo -n ${{ secrets.envfile }} > .env && . .env
         cd ansible
         ansible-galaxy collection install -v -r requirements.yml
         export azure_source_resource_group_name=${{ github.event.inputs.azure_source_resource_group_name }}
