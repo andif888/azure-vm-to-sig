@@ -19,34 +19,20 @@ jobs:
   build_job:
     name: build_job
     runs-on: ubuntu-latest
+
+    container:
+      image: andif888/docker-pataz
+
     steps:
-    - name: checkout_repo
+    - name: checkout repo
       uses: actions/checkout@v2
 
-    - name: ansible_setup
-      id: ansible_setup
-      run: |
-        sudo apt-get update
-        sudo apt install -y curl jq unzip python3-pip python3-netaddr python3-jmespath sshpass
-        sudo pip install --upgrade pip
-        pip install ansible cryptography passlib msrest
-        pip install ansible[azure]
-        ansible-galaxy collection install azure.azcollection
-        pip install -r ~/.ansible/collections/ansible_collections/azure/azcollection/requirements-azure.txt
-
-    - name: terraform_setup
-      env:
-        TF_VERSION: 1.1.5
-      run: |
-        curl -O https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip
-        sudo unzip terraform_${TF_VERSION}_linux_amd64.zip -d /usr/bin
-        rm -f terraform_${TF_VERSION}_linux_amd64.zip
-        sudo chmod +x /usr/bin/terraform
-
-    - name: azure_cli_setup
-      id: azure_cli_setup
-      run: |
-        curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+    - name: show versions
+        run: |
+          ansible --version
+          packer --version
+          terraform --version
+          az --version
 
     - name: ssh_setup
       env:
@@ -55,8 +41,8 @@ jobs:
         echo -n ${{ secrets.envfile }} > .env && source .env
         ssh-agent -a $SSH_AUTH_SOCK > /dev/null
 
-    - name: ansible_playbook_site
-      id: ansible_playbook_site
+    - name: ansible playbook
+      id: ansible_playbook
       env:
         SSH_AUTH_SOCK: /tmp/ssh_agent.sock
       run: |
