@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
 
     container:
-      image: andif888/docker-pataz
+      image: andif888/docker-pataz:v0.9.4
 
     steps:
     - name: checkout repo
@@ -50,7 +50,7 @@ jobs:
         echo -n ${{ secrets.envfile }} > .env
         . ./.env
         cd ansible
-        ansible-galaxy collection install -v -r requirements.yml
+        # ansible-galaxy collection install -v -r requirements.yml
         export azure_source_resource_group_name=${{ github.event.inputs.azure_source_resource_group_name }}
         export azure_source_vm_name=${{ github.event.inputs.azure_source_vm_name }}
         export azure_sig_image_version_name=${{ github.event.inputs.azure_sig_image_version_name }}

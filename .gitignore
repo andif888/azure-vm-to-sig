@@ -11,3 +11,4 @@ vault
 .terraform.lock.hcl
 credentials.auto.tfvars
 ansible.auto.tfvars
+.env.*
